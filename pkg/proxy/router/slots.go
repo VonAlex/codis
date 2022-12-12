@@ -19,7 +19,7 @@ type Slot struct {
 		addr string
 		host []byte
 		port []byte
-		bc   *SharedBackendConn
+		bc   *SharedBackendConn // 与目标 codis-server 服务的 link
 	}
 	migrate struct {
 		from string
@@ -33,12 +33,15 @@ type Slot struct {
 	}
 }
 
+// 加上写锁，并等待该 slot 上的请求处理完，堵塞住所有打到该 slot 上的请求
 func (s *Slot) blockAndWait() {
 	if !s.lock.hold {
 		s.lock.hold = true
 		s.lock.Lock()
 	}
-	s.wait.Wait()
+	// 在处理请求获得后端连接前的 prepare 函数有 r.slot.Add(1)
+	// 在回复 client response 时有 r.slot.Done()
+	s.wait.Wait() // 等待前面的
 }
 
 func (s *Slot) unblock() {

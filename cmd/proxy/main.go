@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docopt/docopt-go"
-	"github.com/ngaut/gostats"
 	"github.com/CodisLabs/codis/pkg/proxy"
 	"github.com/CodisLabs/codis/pkg/proxy/router"
 	"github.com/CodisLabs/codis/pkg/utils"
 	"github.com/CodisLabs/codis/pkg/utils/bytesize"
 	"github.com/CodisLabs/codis/pkg/utils/log"
+	"github.com/docopt/docopt-go"
+	stats "github.com/ngaut/gostats"
 )
 
 var (
@@ -162,23 +162,28 @@ func main() {
 		httpAddr = args["--http-addr"].(string)
 	}
 
+	// ulimit -n 查看 linux 系统可以打开 fd 的最大值，至少 1024
 	checkUlimit(1024)
 	runtime.GOMAXPROCS(cpus)
 
+	// http 后台服务，方便调试等
 	http.HandleFunc("/setloglevel", handleSetLogLevel)
 	go func() {
 		err := http.ListenAndServe(httpAddr, nil)
 		log.PanicError(err, "http debug server quit")
 	}()
 	log.Info("running on ", addr)
+
 	conf, err := proxy.LoadConf(configFile)
 	if err != nil {
 		log.PanicErrorf(err, "load config failed")
 	}
 
+	// server 优雅退出
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, os.Kill)
 
+	// 创建 proxy server 实例，初始状态为 offline，需要操作 zk 将其切换为 online
 	s := proxy.New(addr, httpAddr, conf)
 	defer s.Close()
 
@@ -202,10 +207,11 @@ func main() {
 	}()
 
 	time.Sleep(time.Second)
+	// 将 proxy 状态修改成 online，对外提供服务
 	if err := s.SetMyselfOnline(); err != nil {
 		log.WarnError(err, "mark myself online fail, you need mark online manually by dashboard")
 	}
 
-	s.Join()
+	s.Join() // s.wait.wait()  阻塞等待
 	log.Infof("proxy exit!! :(")
 }

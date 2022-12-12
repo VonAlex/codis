@@ -217,7 +217,7 @@ func (self *ServerGroup) Promote(conn zkhelper.Conn, addr, passwd string) error 
 		return errors.Errorf("no such addr %s", addr)
 	}
 
-	err := utils.SlaveNoOne(s.Addr, passwd)
+	err := utils.SlaveNoOne(s.Addr, passwd) // 首先，发送 slaveof no one，让它成为事实上的 master
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -231,14 +231,14 @@ func (self *ServerGroup) Promote(conn zkhelper.Conn, addr, passwd string) error 
 	// old master may be nil
 	if master != nil {
 		master.Type = SERVER_TYPE_OFFLINE
-		err = self.AddServer(conn, master, passwd)
+		err = self.AddServer(conn, master, passwd) // 然后，在 zk 把原 master 标记成 offline，不需要 response confirm
 		if err != nil {
 			return errors.Trace(err)
 		}
 	}
 
 	// promote new server to master
-	s.Type = SERVER_TYPE_MASTER
+	s.Type = SERVER_TYPE_MASTER // 最后，在 zk 将新 master 标记成 master， ACTION_TYPE_SERVER_GROUP_CHANGED event need response confirm
 	err = self.AddServer(conn, s, passwd)
 	return errors.Trace(err)
 }

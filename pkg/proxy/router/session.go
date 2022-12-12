@@ -74,10 +74,11 @@ func (s *Session) Serve(d Dispatcher, maxPipeline int) {
 		s.Close()
 	}()
 
+	// conn 上发来的 request，堆积 maxPipeline 个后产生堵塞
 	tasks := make(chan *Request, maxPipeline)
 	go func() {
 		defer func() {
-			for _ = range tasks {
+			for _ = range tasks { // 清空 channel
 			}
 		}()
 		if err := s.loopWriter(tasks); err != nil {
@@ -87,6 +88,8 @@ func (s *Session) Serve(d Dispatcher, maxPipeline int) {
 	}()
 
 	defer close(tasks)
+
+	// 读取 conn 上发来的 request
 	if err := s.loopReader(tasks, d); err != nil {
 		errlist.PushBack(err)
 	}
@@ -191,7 +194,7 @@ func (s *Session) handleRequest(resp *redis.Resp, d Dispatcher) (*Request, error
 	case "PING":
 		return s.handlePing(r)
 	case "MGET":
-		return s.handleRequestMGet(r, d)
+		return s.handleRequestMGet(r, d) // 多 key 命令需要单独处理
 	case "MSET":
 		return s.handleRequestMSet(r, d)
 	case "DEL":
@@ -258,13 +261,13 @@ func (s *Session) handleRequestMGet(r *Request, d Dispatcher) (*Request, error) 
 		return r, d.Dispatch(r)
 	}
 	var sub = make([]*Request, nkeys)
-	for i := 0; i < len(sub); i++ {
+	for i := 0; i < len(sub); i++ { // 拆分一个 mget 为多个 mget
 		sub[i] = &Request{
 			OpStr: r.OpStr,
 			Start: r.Start,
 			Resp: redis.NewArray([]*redis.Resp{
-				r.Resp.Array[0],
-				r.Resp.Array[i+1],
+				r.Resp.Array[0],   // mget
+				r.Resp.Array[i+1], // key
 			}),
 			Wait:   r.Wait,
 			Failed: r.Failed,
@@ -273,7 +276,7 @@ func (s *Session) handleRequestMGet(r *Request, d Dispatcher) (*Request, error) 
 			return nil, err
 		}
 	}
-	r.Coalesce = func() error {
+	r.Coalesce = func() error { // 设置 response 聚合函数
 		var array = make([]*redis.Resp, len(sub))
 		for i, x := range sub {
 			if err := x.Response.Err; err != nil {
@@ -288,7 +291,7 @@ func (s *Session) handleRequestMGet(r *Request, d Dispatcher) (*Request, error) 
 			}
 			array[i] = resp.Array[0]
 		}
-		r.Response.Resp = redis.NewArray(array)
+		r.Response.Resp = redis.NewArray(array) // 将多个 mget 的响应拼接到一起
 		return nil
 	}
 	return r, nil

@@ -133,6 +133,8 @@ func (s *Router) fillSlot(i int, addr, from string, lock bool) {
 		return
 	}
 	slot := s.slots[i]
+
+	// slot i 上的请求被堵住，加写锁，禁止读写
 	slot.blockAndWait()
 
 	s.putBackendConn(slot.backend.bc)
@@ -152,10 +154,12 @@ func (s *Router) fillSlot(i int, addr, from string, lock bool) {
 	}
 	if len(from) != 0 {
 		slot.migrate.from = from
+
+		// 创建到 codis-server 的连接
 		slot.migrate.bc = s.getBackendConn(from)
 	}
 
-	if !lock {
+	if !lock { // pre-migrate 先不 unblock
 		slot.unblock()
 	}
 

@@ -133,16 +133,17 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		pingInterval:   time.Duration((int64(recvTimeout) / 2)),
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
-		requests:       make(map[int32]*request),
+		requests:       make(map[int32]*request), // 不同的 xid 对应不同的请求
 		watchers:       make(map[watchPathType][]chan Event),
-		passwd:         emptyPassword,
-		timeout:        int32(zkSessionTimeout),
+		// ConnectRequest 在新建 session 的时候，一定要将 passwd 设置为 16 个字节的字符串，否则无法正常连接
+		passwd:  emptyPassword,
+		timeout: int32(zkSessionTimeout),
 
 		// Debug
 		reconnectDelay: time.Second,
 	}
 	go func() {
-		conn.loop()
+		conn.loop() // loop 循环处理请求
 		conn.flushRequests(ErrClosing)
 		conn.invalidateWatches(ErrClosing)
 		close(conn.eventChan)
@@ -224,7 +225,7 @@ func (c *Conn) loop() {
 				wg.Done()
 			}()
 
-			wg.Wait()
+			wg.Wait() // 阻塞等待
 		}
 
 		c.setState(StateDisconnected)
@@ -336,11 +337,16 @@ func (c *Conn) sendSetWatches() {
 	}()
 }
 
+// handshake
+// 发送握手包进行 timeout 协商，协商成功后会返回一个 session id 和 timeout 值
 func (c *Conn) authenticate() error {
 	buf := make([]byte, 256)
 
 	// connect request
-
+	// 第二个参数必须是指针，且不能为空
+	// zk 要求连接客户端的第一个包必须是 ConnectRequest
+	// 新建 session 时， sessionID 传 0, 服务器返回新的 sessionID 和相应的 passwd，passwd 是一个用于重新恢复 session 的密码，永远是16个字节
+	// 恢复 session 时，则传递原来的 sessionID 和 passwd。
 	n, err := encodePacket(buf[4:], &connectRequest{
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
@@ -352,7 +358,7 @@ func (c *Conn) authenticate() error {
 		return err
 	}
 
-	binary.BigEndian.PutUint32(buf[:4], uint32(n))
+	binary.BigEndian.PutUint32(buf[:4], uint32(n)) // encode 后的长度
 
 	_, err = c.conn.Write(buf[:n+4])
 	if err != nil {
@@ -384,6 +390,8 @@ func (c *Conn) authenticate() error {
 	if err != nil {
 		return err
 	}
+
+	// server 端创建 session 失败了
 	if r.SessionID == 0 {
 		c.sessionID = 0
 		c.passwd = emptyPassword
@@ -395,7 +403,7 @@ func (c *Conn) authenticate() error {
 	if c.sessionID != r.SessionID {
 		atomic.StoreInt32(&c.xid, 0)
 	}
-	c.timeout = r.TimeOut
+	c.timeout = r.TimeOut // conn timeout 根据返回值来确定
 	c.sessionID = r.SessionID
 	c.passwd = r.Passwd
 	c.setState(StateHasSession)

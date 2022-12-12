@@ -111,15 +111,25 @@ func (s *zkstat) Pzxid() int64 {
 	return int64(s.ZPzxid)
 }
 
+// 除协商消息以外的其他消息，请求均以 RequestHeader 开头，
+// 响应均以 ReplyHeader 开头
+// 正的 xid 代表普通的请求，负的 xid 代表特殊请求
+// -1 表示 Watch事件（从服务器推送给客户端）,
+// -2 表示 ping 请求
+// -4 表示 Auth 请求
+// -8 表示 SetWatches 请求
+// 普通请求永远按请求的顺序返回。负的请求可以超前返回
 type requestHeader struct {
-	Xid    int32
-	Opcode int32
+	Xid    int32 // xid 用于将请求和应答相对应
+	Opcode int32 // opcode 用来表示请求的类型
 }
 
+// response 中没有 opcode 字段，
+// 这意味着为了正确解析消息，必须提前记住每个 xid 发送的是什么类型的请求
 type responseHeader struct {
 	Xid  int32
-	Zxid int64
-	Err  ErrCode
+	Zxid int64   // zxid 代表 zk 当前状态的一个序号，单调递增且在不同服务器之间一致 (逻辑时钟)
+	Err  ErrCode // err 代表错误类型，0 的情况下没有出错
 }
 
 type multiHeader struct {
@@ -164,6 +174,7 @@ type CheckVersionRequest PathVersionRequest
 type closeRequest struct{}
 type closeResponse struct{}
 
+// ConnectRequest 和 ConnectResponse 是唯一没有请求头部和响应头部的消息
 type connectRequest struct {
 	ProtocolVersion int32
 	LastZxidSeen    int64
@@ -172,6 +183,8 @@ type connectRequest struct {
 	Passwd          []byte
 }
 
+// 大部分请求都是一个请求格式与一个回应格式相对应。
+// 一部分请求的回应格式是空的（header）。
 type connectResponse struct {
 	ProtocolVersion int32
 	TimeOut         int32

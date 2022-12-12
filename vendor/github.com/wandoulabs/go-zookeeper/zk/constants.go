@@ -61,16 +61,23 @@ const (
 	StateAuthFailed        = State(4)
 	StateConnectedReadOnly = State(5)
 	StateSaslAuthenticated = State(6)
-	StateExpired           = State(-112)
+	// 在和 zk server 成功建立 TCP 连接之后，握手阶段发现 session 超时
+	StateExpired = State(-112)
 	// StateAuthFailed        = State(-113)
 
-	StateConnected  = State(100)
+	// 在和 zk server 成功建立 TCP 连接之后的状态
+	StateConnected = State(100)
+	// 和zk server 成功建立 TCP 连接，并且成功握手(即成功创建 session)
 	StateHasSession = State(101)
 )
 
 const (
+	// 0: 永久节点，除非手动删除
+	// 创建临时节点，session 断开则节点也被删除
 	FlagEphemeral = 1
-	FlagSequence  = 2
+	// 持久时序节点，会自动在节点后面添加序号
+	FlagSequence = 2
+	// 3: Ephemeral 和 Sequence，即，短暂且自动添加序号
 )
 
 var (

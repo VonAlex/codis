@@ -18,10 +18,10 @@ type Request struct {
 	OpStr string
 	Start int64
 
-	Resp *redis.Resp
+	Resp *redis.Resp // 请求数据
 
-	Coalesce func() error
-	Response struct {
+	Coalesce func() error // 聚合函数
+	Response struct {     // 响应数据
 		Resp *redis.Resp
 		Err  error
 	}

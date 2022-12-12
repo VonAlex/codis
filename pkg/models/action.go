@@ -110,7 +110,8 @@ func WaitForReceiverWithTimeout(zkConn zkhelper.Conn, productName string, action
 		time.Sleep(500 * time.Millisecond)
 	}
 	log.Warn("proxies didn't responed: ", proxyIds)
-	// set offline proxies
+
+	// 未响应的 proxy 设置为 offline
 	for id, _ := range proxyIds {
 		log.Errorf("mark proxy %s to PROXY_STATE_MARK_OFFLINE", id)
 		if err := SetProxyStatus(zkConn, productName, id, PROXY_STATE_MARK_OFFLINE); err != nil {
@@ -235,7 +236,7 @@ func NewActionWithTimeout(zkConn zkhelper.Conn, productName string, actionType A
 		Ts:     ts,
 	}
 
-	// set action receivers
+	// set action receivers 所有在线的 proxy
 	proxies, err := ProxyList(zkConn, productName, func(p *ProxyInfo) bool {
 		return p.State == PROXY_STATE_ONLINE
 	})
@@ -252,13 +253,13 @@ func NewActionWithTimeout(zkConn zkhelper.Conn, productName string, actionType A
 		for _, proxy := range proxies {
 			delete(fenceProxies, proxy.Addr)
 		}
-		if len(fenceProxies) > 0 {
+		if len(fenceProxies) > 0 { // 某些 proxy 没有退出
 			errMsg := bytes.NewBufferString("Some proxies may not stop cleanly:")
 			for k, _ := range fenceProxies {
 				errMsg.WriteString(" ")
 				errMsg.WriteString(k)
 			}
-			return errors.Errorf("%s", errMsg)
+			return errors.Errorf("%s", errMsg) // todo: think 这里是否需要退出？
 		}
 	}
 	for _, p := range proxies {
@@ -271,6 +272,7 @@ func NewActionWithTimeout(zkConn zkhelper.Conn, productName string, actionType A
 
 	b, _ := json.Marshal(action)
 
+	// /zk/codis/db_%s/actions
 	prefix := GetWatchActionPath(productName)
 	//action root path
 	err = CreateActionRootPath(zkConn, prefix)
@@ -279,6 +281,7 @@ func NewActionWithTimeout(zkConn zkhelper.Conn, productName string, actionType A
 	}
 
 	//response path
+	// /zk/codis/db_%s/ActionResponse
 	respPath := path.Join(path.Dir(prefix), "ActionResponse")
 	err = CreateActionRootPath(zkConn, respPath)
 	if err != nil {
@@ -287,6 +290,8 @@ func NewActionWithTimeout(zkConn zkhelper.Conn, productName string, actionType A
 
 	//create response node, etcd do not support create in order directory
 	//get path first
+	// 创建带有序号的临时节点
+	// /zk/codis/db_%s/ActionResponse/{seq}
 	actionRespPath, err := zkConn.Create(respPath+"/", b, int32(zk.FlagSequence), zkhelper.DefaultFileACLs())
 	if err != nil {
 		log.ErrorErrorf(err, "zk create resp node = %s", respPath)
@@ -295,15 +300,17 @@ func NewActionWithTimeout(zkConn zkhelper.Conn, productName string, actionType A
 
 	//remove file then create directory
 	zkConn.Delete(actionRespPath, -1)
+	// 永久节点（多 proxy 共享）
 	actionRespPath, err = zkConn.Create(actionRespPath, b, 0, zkhelper.DefaultDirACLs())
 	if err != nil {
 		log.ErrorErrorf(err, "zk create resp node = %s", respPath)
 		return errors.Trace(err)
 	}
-
+	// 拿到 seq
 	suffix := path.Base(actionRespPath)
 
 	// create action node
+	// /zk/codis/db_%s/actions/{seq}
 	actionPath := path.Join(prefix, suffix)
 	_, err = zkConn.Create(actionPath, b, 0, zkhelper.DefaultFileACLs())
 	if err != nil {

@@ -102,10 +102,10 @@ func (bc *BackendConn) loopWriter() error {
 		for ok {
 			var flush = len(bc.input) == 0
 			if bc.canForward(r) {
-				if err := p.Encode(r.Resp, flush); err != nil {
+				if err := p.Encode(r.Resp, flush); err != nil { // 写到后端 redis
 					return bc.setResponse(r, nil, err)
 				}
-				tasks <- r
+				tasks <- r // 等待 respones
 			} else {
 				if err := p.Flush(flush); err != nil {
 					return bc.setResponse(r, nil, err)
